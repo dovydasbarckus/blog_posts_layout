@@ -25,13 +25,22 @@ def about():
 
 @app.route('/contacts')
 def contacts():
-    return render_template("contact.html")
+    return render_template("contact.html", message="Contact Me")
 
 
 @app.route('/post/<int:id>')
 def one_post(id):
     content = all_posts[id - 1]
     return render_template("post.html", content=content)
+
+@app.route("/contacts", methods=["POST"])
+def receive_data():
+    data = request.form
+    print(data["name"])
+    print(data["email"])
+    print(data["phone"])
+    print(data["message"])
+    return render_template("contact.html", message="Successfully sent your message")
 
 
 if __name__ == "__main__":
