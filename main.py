@@ -1,5 +1,6 @@
 from functools import wraps
 from flask import Flask, render_template, request, url_for, flash, abort
+from flask_gravatar import Gravatar
 from flask_sqlalchemy import SQLAlchemy
 from flask_ckeditor import CKEditor, CKEditorField
 from flask_wtf import FlaskForm, RecaptchaField
@@ -10,8 +11,9 @@ from wtforms import StringField, PasswordField, SubmitField, EmailField, DateTim
 from wtforms.validators import DataRequired, InputRequired, Length, URL
 from flask_bootstrap import Bootstrap
 import datetime
-from forms import RegisterForm, LoginForm
+from forms import RegisterForm, LoginForm, CommentForm
 from flask_login import UserMixin, login_user, LoginManager, login_required, current_user, logout_user
+from flask_migrate import Migrate
 import requests
 
 
@@ -26,6 +28,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///blog.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = "sadLAHSDK/.64646adA"
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -53,6 +56,7 @@ class BlogPost(db.Model):
     author_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     # Create reference to the User object, the "posts" refers to the posts protperty in the User class.
     author = relationship("User", back_populates="posts")
+    comments = relationship("Comment", back_populates="parent_post")
 
     def __repr__(self):
         return '<Post %r>' % self.title
@@ -62,6 +66,7 @@ class User(UserMixin, db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     posts = relationship("BlogPost", back_populates="author")
+    comments = relationship("Comment", back_populates="comment_author")
     name = db.Column(db.String(1000))
     email = db.Column(db.String(100), unique=True)
     password = db.Column(db.String(100))
@@ -82,7 +87,33 @@ class User(UserMixin, db.Model):
     def get_id(self):
         return str(self.id)
 
+
+class Comment(db.Model):
+    __tablename__ = 'comments'
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    author_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    comment_author = relationship("User", back_populates="comments")
+    post_id = db.Column(db.Integer, db.ForeignKey("blog_posts.id"), nullable=True)
+    parent_post = relationship("BlogPost", back_populates="comments")
+
+
+    def __repr__(self):
+        return '<Comment %r>' % self.content
+
+
 # db.create_all()
+# db.session.commit()
+
+gravatar = Gravatar(app,
+                    size=100,
+                    rating='g',
+                    default='retro',
+                    force_default=False,
+                    force_lower=False,
+                    use_ssl=False,
+                    base_url=None)
+
 
 class PostForm(FlaskForm):
     title = StringField('Title', validators=[InputRequired(message='Your post title')])
@@ -106,7 +137,6 @@ def home():
 
         # ----------- using posts from Database ---------
     all_posts = reversed(BlogPost.query.all())
-    print(all_posts)
     return render_template("index.html", all_posts=all_posts)
 
 
@@ -120,14 +150,30 @@ def contacts():
     return render_template("contact.html", message="Contact Me")
 
 
-@app.route('/post/<int:id>')
+@app.route('/post/<int:id>', methods=["POST", "GET"])
 def one_post(id):
     # -------- using posts from Api --------
     # content = all_posts[id - 1]
 
     # ----------- using posts from Database ---------
     content = BlogPost.query.get(id)
-    return render_template("post.html", content=content)
+    form = CommentForm()
+    if request.method == "POST" and form.validate_on_submit():
+        if current_user.is_authenticated:
+            data = request.form.get('comment')
+            new_comment = Comment(
+                content=data,
+                author_id=current_user.id,
+                post_id=id,
+            )
+            db.session.add(new_comment)
+            db.session.commit()
+        else:
+            flash("You need to log in or register to add comments!")
+            return redirect(url_for("login"))
+        return redirect(request.referrer)
+    else:
+        return render_template("post.html", content=content, form=form)
 
 
 @app.route("/contacts", methods=["POST"])
